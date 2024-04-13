@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import calendar
 import openpyxl
 import sys
+import os
 
 from exceptions import AuthError, CsrfTokenError
 
@@ -18,8 +19,8 @@ class ParaplanAPI:
     STUDENT_CARD_URL_TEMPLATE = "https://paraplancrm.ru/crm/#/students/{student_id}/groups"
 
     LOGIN_DATA = json.dumps({
-        "username": "mdcode.vadim@gmail.com",
-        "password": "123123123aa",
+        "username": os.getenv("LOGIN"),
+        "password": os.getenv("PASS"),
         "locale": "RU",
         "loginType": "KIDS_APP",
         "rememberMe": False,
