@@ -6,8 +6,13 @@ import calendar
 import openpyxl
 import sys
 import os
+import logging
 
 from exceptions import AuthError, CsrfTokenError
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, filename="logs.log",
+                    format="%(asctime)s::%(levelname)s::%(message)s")
 
 
 class ParaplanAPI:
@@ -173,7 +178,7 @@ class ParaplanAPI:
                     "subs_end_date": subs_end_date
                 }
             )
-            print(f"Student {student['id']} processed")
+            logger.info(f"Student {student['id']} processed")
 
         return students_with_non_renewed_subscription
 
@@ -198,7 +203,7 @@ class ParaplanAPI:
                         self.STUDENT_CARD_URL_TEMPLATE.format(student_id=student["id"])
                     )
 
-                print(f"Student {student['id']} processed")
+                logger.info(f"Student {student['id']} processed")
 
         return {
             "have_non_renewed_subscription": students_ids_who_have_non_renewed_subscription,
@@ -224,7 +229,7 @@ class ParaplanAPI:
                     "total_price": subscription["totalPrice"]
                 })
 
-                print(f"Student {student['id']} processed")
+                logger.info(f"Student {student['id']} processed")
 
         return students_with_ending_subscription_in_next_month
 
@@ -245,6 +250,7 @@ class ParaplanAPI:
             ws[f"C{row_index}"] = student["link"]
 
         wb.save(filename="students-month.xlsx")
+        logger.info("Excel file with non-renewed subs in month was created")
 
     def create_excel_file_with_students_week_subscriptions_info(self) -> None:
 
@@ -267,6 +273,7 @@ class ParaplanAPI:
             ws[f"C{row_index}"] = student_link
 
         wb.save(filename="students-week-info.xlsx")
+        logger.info("Excel file with students week subs info was created")
 
     def create_excel_students_with_ending_subscription_in_next_month(self) -> None:
 
@@ -285,16 +292,18 @@ class ParaplanAPI:
             ws[f"C{row_index}"] = student["link"]
 
         wb.save(filename="students-predicts.xlsx")
+        logger.info("Excel file with students ending subs in next month was created")
 
 
 def main():
 
     if len(sys.argv) < 2:
-        print("Не указан тип действия")
-        print("Используйте current-month | current-week | next-month")
+        logger.error("Не указан тип действия\nИспользуйте current-month | current-week | next-month")
+        print("Не указан тип действия\nИспользуйте current-month | current-week | next-month")
         return
 
     if sys.argv[1] not in ["current-month", "current-week", "next-month"]:
+        logger.error("Используйте current-month | current-week | next-month")
         print("Используйте current-month | current-week | next-month")
         return
 
@@ -312,6 +321,11 @@ if __name__ == "__main__":
     try:
         main()
     except AuthError as err:
+        logger.error(err)
         print(err)
     except CsrfTokenError as err:
+        logger.error(err)
+        print(err)
+    except Exception as err:
+        logger.error(err)
         print(err)
