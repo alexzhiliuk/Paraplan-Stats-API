@@ -216,14 +216,12 @@ class ParaplanAPI:
                 filter_by_end_date=True
             )
 
-            if subscriptions_ending_in_next_month:
-
-                total_price = sum([sub["totalPrice"] for sub in subscriptions_ending_in_next_month])
+            for subscription in subscriptions_ending_in_next_month:
 
                 students_with_ending_subscription_in_next_month.append({
                     "link": self.STUDENT_CARD_URL_TEMPLATE.format(student_id=student["id"]),
-                    "subs_end_date": self._format_subs_end_date(subscriptions_ending_in_next_month[0]["endDate"]),
-                    "total_price": total_price
+                    "subs_end_date": self._format_subs_end_date(subscription["endDate"]),
+                    "total_price": subscription["totalPrice"]
                 })
 
                 print(f"Student {student['id']} processed")
