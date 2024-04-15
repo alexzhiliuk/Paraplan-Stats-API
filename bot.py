@@ -47,5 +47,3 @@ def send_report_to_tg(filename: str) -> None:
             logger.error(err)
 
     remove_report_file(filename)
-
-send_report_to_tg("students-predicts.xlsx")
