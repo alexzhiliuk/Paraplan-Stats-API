@@ -7,12 +7,16 @@ import openpyxl
 import sys
 import os
 import logging
+from dotenv import load_dotenv
 
 from exceptions import AuthError, CsrfTokenError
+from bot import send_report_to_tg
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, filename="logs.log",
                     format="%(asctime)s::%(levelname)s::%(message)s")
+
+load_dotenv()
 
 
 class ParaplanAPI:
@@ -24,8 +28,8 @@ class ParaplanAPI:
     STUDENT_CARD_URL_TEMPLATE = "https://paraplancrm.ru/crm/#/students/{student_id}/groups"
 
     LOGIN_DATA = json.dumps({
-        "username": os.getenv("LOGIN"),
-        "password": os.getenv("PASS"),
+        "username": os.getenv("LOGIN", None),
+        "password": os.getenv("PASS", None),
         "locale": "RU",
         "loginType": "KIDS_APP",
         "rememberMe": False,
@@ -233,7 +237,7 @@ class ParaplanAPI:
 
         return students_with_ending_subscription_in_next_month
 
-    def create_excel_file_students_with_non_renewed_subscription_in_month(self) -> None:
+    def create_excel_file_students_with_non_renewed_subscription_in_month(self, filename) -> None:
 
         students = self.get_students_with_non_renewed_subscription_in_month()
 
@@ -249,10 +253,10 @@ class ParaplanAPI:
             ws[f"B{row_index}"] = student["subs_end_date"]
             ws[f"C{row_index}"] = student["link"]
 
-        wb.save(filename="students-month.xlsx")
+        wb.save(filename=filename)
         logger.info("Excel file with non-renewed subs in month was created")
 
-    def create_excel_file_with_students_week_subscriptions_info(self) -> None:
+    def create_excel_file_with_students_week_subscriptions_info(self, filename) -> None:
 
         subs_info = self.get_students_week_subscriptions_info()
 
@@ -272,10 +276,10 @@ class ParaplanAPI:
         for row_index, student_link in enumerate(subs_info["who_renewed_subscription"], start=3):
             ws[f"C{row_index}"] = student_link
 
-        wb.save(filename="students-week-info.xlsx")
+        wb.save(filename=filename)
         logger.info("Excel file with students week subs info was created")
 
-    def create_excel_students_with_ending_subscription_in_next_month(self) -> None:
+    def create_excel_students_with_ending_subscription_in_next_month(self, filename: str) -> None:
 
         students = self.get_students_with_ending_subscription_in_next_month()
 
@@ -291,7 +295,7 @@ class ParaplanAPI:
             ws[f"B{row_index}"] = student["subs_end_date"]
             ws[f"C{row_index}"] = student["link"]
 
-        wb.save(filename="students-predicts.xlsx")
+        wb.save(filename=filename)
         logger.info("Excel file with students ending subs in next month was created")
 
 
@@ -310,11 +314,17 @@ def main():
     paraplan = ParaplanAPI()
 
     if sys.argv[1] == "current-month":
-        paraplan.create_excel_file_students_with_non_renewed_subscription_in_month()
+        filename = "students-month.xlsx"
+        paraplan.create_excel_file_students_with_non_renewed_subscription_in_month(filename)
+        send_report_to_tg(filename)
     if sys.argv[1] == "current-week":
-        paraplan.create_excel_file_with_students_week_subscriptions_info()
+        filename = "students-week-info.xlsx"
+        paraplan.create_excel_file_with_students_week_subscriptions_info(filename)
+        send_report_to_tg(filename)
     if sys.argv[1] == "next-month":
-        paraplan.create_excel_students_with_ending_subscription_in_next_month()
+        filename = "students-predicts.xlsx"
+        paraplan.create_excel_students_with_ending_subscription_in_next_month(filename)
+        send_report_to_tg(filename)
 
 
 if __name__ == "__main__":
