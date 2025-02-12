@@ -41,3 +41,8 @@ python main.py current-week
 ```bash
 python main.py next-month
 ```
+
+Для генерации отчета “Конверсия пробных занятий”
+```bash
+python main.py conversion-of-trial-sessions
+```

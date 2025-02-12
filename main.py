@@ -1,3 +1,5 @@
+from pprint import pprint
+
 import requests
 import json
 from typing import Literal
@@ -24,6 +26,9 @@ class ParaplanAPI:
     USER_URL = BASE_URL + "api/open/user"
     LOGIN_URL = BASE_URL + "api/public/login"
     STUDENTS_URL = BASE_URL + "api/open/students/min-info"
+    ATTENDANCES_STATUSES_URL = BASE_URL + "api/open/attendances/students/statuses"
+    ATTENDANCES_URL_TEMPLATE = BASE_URL + "api/open/company/attendances/breakdown/group?date.year={year}&date.month={month}&date.day={day}&scheduleBreakdownAccessTypeSet=ATTENDANCES&scheduleBreakdownAccessTypeSet=LESSONS&scheduleBreakdownAccessTypeSet=PREBOOKINGS&scheduleBreakdownAccessTypeSet=SCHEDULE_MODIFICATIONS"
+    ATTENDANCES_FOR_SCREEN_URL_TEMPLATE = BASE_URL + "api/open/company/attendances/{attendance_id}/forAttendanceScreen"
     STUDENT_SUBSCRIPTIONS_URL_TEMPLATE = BASE_URL + "/api/open/students/{student_id}/subscriptions/paginated?page=1&size=10"
     STUDENT_CARD_URL_TEMPLATE = "https://paraplancrm.ru/crm/#/students/{student_id}/groups"
 
@@ -118,6 +123,10 @@ class ParaplanAPI:
     def _get_end_period_parameters(end_date: date):
         return f"&to.day={end_date.day}&to.month={end_date.month}&to.year={end_date.year}"
 
+    def get_attendances_statuses(self):
+
+        return self.session.get(self.ATTENDANCES_STATUSES_URL).json()
+
     def _get_students(self) -> list:
         response = self.session.post(self.STUDENTS_URL, headers=self.HEADERS, data=self.STUDENTS_DATA)
         return response.json()["studentList"]
@@ -195,7 +204,8 @@ class ParaplanAPI:
 
             if self._get_student_subscriptions(student["id"], self.current_week_period, filter_by_end_date=True):
 
-                if self._get_student_subscriptions(student["id"], self.after_current_week_period, filter_by_end_date=True):
+                if self._get_student_subscriptions(student["id"], self.after_current_week_period,
+                                                   filter_by_end_date=True):
 
                     students_ids_who_renewed_subscription.append(
                         self.STUDENT_CARD_URL_TEMPLATE.format(student_id=student["id"])
@@ -226,7 +236,6 @@ class ParaplanAPI:
             )
 
             for subscription in subscriptions_ending_in_next_month:
-
                 students_with_ending_subscription_in_next_month.append({
                     "link": self.STUDENT_CARD_URL_TEMPLATE.format(student_id=student["id"]),
                     "subs_end_date": self._format_subs_end_date(subscription["endDate"]),
@@ -236,6 +245,60 @@ class ParaplanAPI:
                 logger.info(f"Student {student['id']} processed")
 
         return students_with_ending_subscription_in_next_month
+
+    def _get_attendances_ids(self, attendance_date: date) -> list:
+        attendance_list = self.session.get(
+            self.ATTENDANCES_URL_TEMPLATE.format(year=attendance_date.year, month=attendance_date.month,
+                                                 day=attendance_date.day)
+        ).json()["breakdown"]["attendanceList"]
+
+        return [attendance.get("id") for attendance in attendance_list]
+
+    def get_students_attended_trial_and_has_subscription(self) -> list:
+
+        statuses_ids = ["fea4db4a-b812-a27f-1d02-998fc23f76b3", "78e0eab0-b4d4-9cd2-3c9a-bc862db3bbbc"]
+        start_date, end_date = self._get_month_period("current")
+        students_attended_trial_and_has_subscription = []
+
+        # Перебор всех дней для сбора занятий
+        current_date = start_date
+        while current_date <= end_date:
+            attendances_ids = self._get_attendances_ids(current_date)
+
+            # Перебор всех занятий для поиска учеников
+            for attendance_id in attendances_ids:
+
+                attendance = self.session.get(
+                    self.ATTENDANCES_FOR_SCREEN_URL_TEMPLATE.format(attendance_id=attendance_id)).json()["attendance"]
+
+                # Получаем учеников только с нужным статусом
+                attendees_list = [{"id": attendee["studentInfo"]["id"], "name": attendee["studentInfo"]["name"]} for
+                                  attendee in attendance["attendeeList"] if attendee["statusId"] in statuses_ids]
+
+                attendance_time = f"{attendance['dateTime']['hour']}:{str(attendance['dateTime']['minute']).zfill(2)}"
+                attendance_teachers = " ".join([teacher["teacherInfo"]["name"] for teacher in attendance["teacherList"]])
+
+                # Проверка наличия подписки у студента
+                for attendee in attendees_list:
+                    subscriptions = self._get_student_subscriptions(attendee["id"])
+                    is_subscribed = "Не куплен"
+                    if len(subscriptions):
+                        is_subscribed = "Куплен"
+
+                    students_attended_trial_and_has_subscription.append(
+                        {
+                            "name": attendee["name"],
+                            "link": self.STUDENT_CARD_URL_TEMPLATE.format(student_id=attendee["id"]),
+                            "date": f"{current_date} {attendance_time}",
+                            "is_subscribed": is_subscribed,
+                            "teachers": attendance_teachers
+                        }
+                    )
+                    logger.info(f"Student {attendee['id']} processed")
+
+            current_date += timedelta(days=1)
+
+        return students_attended_trial_and_has_subscription
 
     def create_excel_file_students_with_non_renewed_subscription_in_month(self, filename) -> None:
 
@@ -298,21 +361,47 @@ class ParaplanAPI:
         wb.save(filename=filename)
         logger.info("Excel file with students ending subs in next month was created")
 
+    def create_excel_students_attended_trial_and_has_subscription(self, filename: str) -> None:
+
+        students = self.get_students_attended_trial_and_has_subscription()
+
+        wb = openpyxl.Workbook()
+        ws = wb.worksheets[0]
+
+        ws["A1"] = "Имя ученика"
+        ws["B1"] = "Ссылка на карточку ученика"
+        ws["C1"] = "Дата пробного занятия"
+        ws["D1"] = "Статус абонемента"
+        ws["E1"] = "Педагог"
+
+        for row_index, student in enumerate(students, start=2):
+            ws[f"A{row_index}"] = student["name"]
+            ws[f"B{row_index}"] = student["link"]
+            ws[f"C{row_index}"] = student["date"]
+            ws[f"D{row_index}"] = student["is_subscribed"]
+            ws[f"E{row_index}"] = student["teachers"]
+
+        wb.save(filename=filename)
+        logger.info("Excel file with students ending subs in next month was created")
+
 
 def main():
-
     if len(sys.argv) < 2:
-        logger.error("Не указан тип действия\nИспользуйте current-month | current-week | next-month")
-        print("Не указан тип действия\nИспользуйте current-month | current-week | next-month")
+        logger.error("Не указан тип действия\nИспользуйте current-month | current-week | next-month | conversion-of-trial-sessions")
+        print("Не указан тип действия\nИспользуйте current-month | current-week | next-month | conversion-of-trial-sessions")
         return
 
-    if sys.argv[1] not in ["current-month", "current-week", "next-month"]:
-        logger.error("Используйте current-month | current-week | next-month")
-        print("Используйте current-month | current-week | next-month")
+    if sys.argv[1] not in ["current-month", "current-week", "next-month", "conversion-of-trial-sessions"]:
+        logger.error("Используйте current-month | current-week | next-month | conversion-of-trial-sessions")
+        print("Используйте current-month | current-week | next-month | conversion-of-trial-sessions")
         return
 
     paraplan = ParaplanAPI()
 
+    if sys.argv[1] == "conversion-of-trial-sessions":
+        filename = "conversion-of-trial-sessions.xlsx"
+        paraplan.create_excel_students_attended_trial_and_has_subscription(filename)
+        send_report_to_tg(filename)
     if sys.argv[1] == "current-month":
         filename = "students-month.xlsx"
         paraplan.create_excel_file_students_with_non_renewed_subscription_in_month(filename)
