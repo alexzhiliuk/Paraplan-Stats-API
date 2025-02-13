@@ -30,6 +30,7 @@ class ParaplanAPI:
     ATTENDANCES_URL_TEMPLATE = BASE_URL + "api/open/company/attendances/breakdown/group?date.year={year}&date.month={month}&date.day={day}&scheduleBreakdownAccessTypeSet=ATTENDANCES&scheduleBreakdownAccessTypeSet=LESSONS&scheduleBreakdownAccessTypeSet=PREBOOKINGS&scheduleBreakdownAccessTypeSet=SCHEDULE_MODIFICATIONS"
     ATTENDANCES_FOR_SCREEN_URL_TEMPLATE = BASE_URL + "api/open/company/attendances/{attendance_id}/forAttendanceScreen"
     STUDENT_SUBSCRIPTIONS_URL_TEMPLATE = BASE_URL + "/api/open/students/{student_id}/subscriptions/paginated?page=1&size=10"
+    GROUP_INFO_URL_TEMPLATE = BASE_URL + "api/open/groups/{group_id}"
     STUDENT_CARD_URL_TEMPLATE = "https://paraplancrm.ru/crm/#/students/{student_id}/groups"
 
     LOGIN_DATA = json.dumps({
@@ -147,6 +148,9 @@ class ParaplanAPI:
 
         return subscriptions
 
+    def _get_group_info(self, group_id):
+        return self.session.get(self.GROUP_INFO_URL_TEMPLATE.format(group_id=group_id)).json().get("group")
+
     def _filter_subscriptions_by_end_date(self, subscriptions: list, period: tuple[date | None, date | None]) -> list:
         if period[0] and period[1]:
             return list(filter(
@@ -184,11 +188,14 @@ class ParaplanAPI:
             if not subs_end_date:
                 continue
 
+            group_info = self._get_group_info(self._get_student_subscriptions(student["id"])[0]["groupList"][0]["id"])
             students_with_non_renewed_subscription.append(
                 {
                     "name": student["name"],
                     "link": self.STUDENT_CARD_URL_TEMPLATE.format(student_id=student["id"]),
-                    "subs_end_date": subs_end_date
+                    "subs_end_date": subs_end_date,
+                    "type": group_info.get("type"),
+                    "teacher": group_info["teacherList"][0]["name"] if group_info["teacherList"] else "-"
                 }
             )
             logger.info(f"Student {student['id']} processed")
@@ -202,20 +209,29 @@ class ParaplanAPI:
 
         for student in students:
 
-            if self._get_student_subscriptions(student["id"], self.current_week_period, filter_by_end_date=True):
+            current_week_subscriptions = self._get_student_subscriptions(student["id"], self.current_week_period,
+                                                                         filter_by_end_date=True)
+            if current_week_subscriptions:
 
-                if self._get_student_subscriptions(student["id"], self.after_current_week_period,
-                                                   filter_by_end_date=True):
+                after_current_week_subscriptions = self._get_student_subscriptions(student["id"],
+                                                                                   self.after_current_week_period,
+                                                                                   filter_by_end_date=True)
+                if after_current_week_subscriptions:
 
-                    students_ids_who_renewed_subscription.append(
-                        self.STUDENT_CARD_URL_TEMPLATE.format(student_id=student["id"])
-                    )
+                    group_info = self._get_group_info(after_current_week_subscriptions[0]["groupList"][0]["id"])
+                    students_ids_who_renewed_subscription.append({
+                        "link": self.STUDENT_CARD_URL_TEMPLATE.format(student_id=student["id"]),
+                        "type": group_info.get("type"),
+                        "teacher": group_info["teacherList"][0]["name"] if group_info["teacherList"] else "-"
+                    })
 
                 else:
-
-                    students_ids_who_have_non_renewed_subscription.append(
-                        self.STUDENT_CARD_URL_TEMPLATE.format(student_id=student["id"])
-                    )
+                    group_info = self._get_group_info(current_week_subscriptions[0]["groupList"][0]["id"])
+                    students_ids_who_have_non_renewed_subscription.append({
+                        "link": self.STUDENT_CARD_URL_TEMPLATE.format(student_id=student["id"]),
+                        "type": group_info.get("type"),
+                        "teacher": group_info["teacherList"][0]["name"] if group_info["teacherList"] else "-"
+                    })
 
                 logger.info(f"Student {student['id']} processed")
 
@@ -310,11 +326,15 @@ class ParaplanAPI:
         ws["A1"] = "Имя ученика"
         ws["B1"] = "Дата окончания абонемента"
         ws["C1"] = "Ссылка на карточку ученика"
+        ws["D1"] = "Статус занятия"
+        ws["E1"] = "Преподаватель"
 
         for row_index, student in enumerate(students, start=2):
             ws[f"A{row_index}"] = student["name"]
             ws[f"B{row_index}"] = student["subs_end_date"]
             ws[f"C{row_index}"] = student["link"]
+            ws[f"D{row_index}"] = student["type"]
+            ws[f"E{row_index}"] = student["teacher"]
 
         wb.save(filename=filename)
         logger.info("Excel file with non-renewed subs in month was created")
@@ -330,14 +350,22 @@ class ParaplanAPI:
         ws["A2"] = f"{len(subs_info["have_non_renewed_subscription"]) + len(subs_info["who_renewed_subscription"])}"
         ws["B1"] = "Непродлившие"
         ws["B2"] = f"{len(subs_info["have_non_renewed_subscription"])}"
-        ws["C1"] = "Продлившие"
-        ws["C2"] = f"{len(subs_info["who_renewed_subscription"])}"
+        ws["C1"] = "Статус занятия"
+        ws["D1"] = "Преподаватель"
+        ws["E1"] = "Продлившие"
+        ws["E2"] = f"{len(subs_info["who_renewed_subscription"])}"
+        ws["F1"] = "Статус занятия"
+        ws["G1"] = "Преподаватель"
 
         for row_index, student_link in enumerate(subs_info["have_non_renewed_subscription"], start=3):
-            ws[f"B{row_index}"] = student_link
+            ws[f"B{row_index}"] = student_link["link"]
+            ws[f"C{row_index}"] = student_link["type"]
+            ws[f"D{row_index}"] = student_link["teacher"]
 
         for row_index, student_link in enumerate(subs_info["who_renewed_subscription"], start=3):
-            ws[f"C{row_index}"] = student_link
+            ws[f"E{row_index}"] = student_link["link"]
+            ws[f"F{row_index}"] = student_link["type"]
+            ws[f"G{row_index}"] = student_link["teacher"]
 
         wb.save(filename=filename)
         logger.info("Excel file with students week subs info was created")
@@ -426,5 +454,5 @@ if __name__ == "__main__":
         logger.error(err)
         print(err)
     except Exception as err:
-        logger.error(err)
+        logger.error(err, exc_info=True)
         print(err)
