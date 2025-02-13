@@ -254,7 +254,7 @@ class ParaplanAPI:
 
         return [attendance.get("id") for attendance in attendance_list]
 
-    def get_students_attended_trial_and_has_subscription(self) -> list:
+    def get_students_attended_trial(self) -> list:
 
         statuses_ids = ["fea4db4a-b812-a27f-1d02-998fc23f76b3", "78e0eab0-b4d4-9cd2-3c9a-bc862db3bbbc"]
         start_date, end_date = self._get_month_period("current")
@@ -361,9 +361,9 @@ class ParaplanAPI:
         wb.save(filename=filename)
         logger.info("Excel file with students ending subs in next month was created")
 
-    def create_excel_students_attended_trial_and_has_subscription(self, filename: str) -> None:
+    def create_excel_students_attended_trial(self, filename: str) -> None:
 
-        students = self.get_students_attended_trial_and_has_subscription()
+        students = self.get_students_attended_trial()
 
         wb = openpyxl.Workbook()
         ws = wb.worksheets[0]
@@ -382,7 +382,7 @@ class ParaplanAPI:
             ws[f"E{row_index}"] = student["teachers"]
 
         wb.save(filename=filename)
-        logger.info("Excel file with students ending subs in next month was created")
+        logger.info("Excel file with students attended trial was created")
 
 
 def main():
@@ -400,7 +400,7 @@ def main():
 
     if sys.argv[1] == "conversion-of-trial-sessions":
         filename = "conversion-of-trial-sessions.xlsx"
-        paraplan.create_excel_students_attended_trial_and_has_subscription(filename)
+        paraplan.create_excel_students_attended_trial(filename)
         send_report_to_tg(filename)
     if sys.argv[1] == "current-month":
         filename = "students-month.xlsx"
