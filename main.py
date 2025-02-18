@@ -28,10 +28,15 @@ class ParaplanAPI:
     STUDENTS_URL = BASE_URL + "api/open/students/min-info"
     ATTENDANCES_STATUSES_URL = BASE_URL + "api/open/attendances/students/statuses"
     ATTENDANCES_URL_TEMPLATE = BASE_URL + "api/open/company/attendances/breakdown/group?date.year={year}&date.month={month}&date.day={day}&scheduleBreakdownAccessTypeSet=ATTENDANCES&scheduleBreakdownAccessTypeSet=LESSONS&scheduleBreakdownAccessTypeSet=PREBOOKINGS&scheduleBreakdownAccessTypeSet=SCHEDULE_MODIFICATIONS"
+    IND_ATTENDANCES_URL_TEMPLATE = BASE_URL + "api/open/company/attendances/breakdown/individual?date.year={year}&date.month={month}&date.day={day}&scheduleBreakdownAccessTypeSet=ATTENDANCES&scheduleBreakdownAccessTypeSet=LESSONS&scheduleBreakdownAccessTypeSet=PREBOOKINGS&scheduleBreakdownAccessTypeSet=SCHEDULE_MODIFICATIONS"
     ATTENDANCES_FOR_SCREEN_URL_TEMPLATE = BASE_URL + "api/open/company/attendances/{attendance_id}/forAttendanceScreen"
     STUDENT_SUBSCRIPTIONS_URL_TEMPLATE = BASE_URL + "/api/open/students/{student_id}/subscriptions/paginated?page=1&size=10"
     GROUP_INFO_URL_TEMPLATE = BASE_URL + "api/open/groups/{group_id}"
     STUDENT_CARD_URL_TEMPLATE = "https://paraplancrm.ru/crm/#/students/{student_id}/groups"
+
+    STATUSES = {
+        "ATTENDED_TRIAL": ["fea4db4a-b812-a27f-1d02-998fc23f76b3", "78e0eab0-b4d4-9cd2-3c9a-bc862db3bbbc"]
+    }
 
     LOGIN_DATA = json.dumps({
         "username": os.getenv("LOGIN", None),
@@ -179,6 +184,81 @@ class ParaplanAPI:
 
         return True, self._format_subs_end_date(previous_period_subs[0]["endDate"])
 
+    def _get_attendances_ids(self, attendance_date: date) -> list:
+        attendance_list = self.session.get(
+            self.ATTENDANCES_URL_TEMPLATE.format(year=attendance_date.year, month=attendance_date.month,
+                                                 day=attendance_date.day)
+        ).json()["breakdown"]["attendanceList"]
+
+        return [attendance.get("id") for attendance in attendance_list]
+
+    def _get_filtered_attendees(self, attendance) -> [list, str, str]:
+
+        attendees_list = [{"id": attendee["studentInfo"]["id"], "name": attendee["studentInfo"]["name"]} for
+                          attendee in attendance["attendeeList"] if
+                          attendee["statusId"] in self.STATUSES["ATTENDED_TRIAL"]]
+
+        attendance_time = f"{attendance['dateTime']['hour']}:{str(attendance['dateTime']['minute']).zfill(2)}"
+        attendance_teachers = " ".join(
+            [teacher["teacherInfo"]["name"] for teacher in attendance["teacherList"]])
+
+        return attendees_list, attendance_time, attendance_teachers
+
+    def _get_students_attended_individual_trial(self, attendance_date: date) -> list:
+        group_list = self.session.get(self.IND_ATTENDANCES_URL_TEMPLATE.format(year=attendance_date.year,
+                                                                               month=attendance_date.month,
+                                                                               day=attendance_date.day)).json()[
+            "groupList"]
+        students_attended_trial_and_has_subscription = []
+
+        for group in group_list:
+            for attendance in group.get("attendanceList", []):
+                # Получаем учеников только с нужным статусом
+                attendees_list, attendance_time, attendance_teachers = self._get_filtered_attendees(attendance)
+
+                # Проверка наличия подписки у студента
+                students_attended_trial_and_has_subscription += self._get_row_data_for_student_attended_trial(
+                    attendees_list, attendance_date, attendance_time, attendance_teachers)
+
+        return students_attended_trial_and_has_subscription
+
+    def _get_students_attended_group_trial(self, attendance_date: date) -> list:
+        attendances_ids = self._get_attendances_ids(attendance_date)
+        students_attended_trial_and_has_subscription = []
+
+        # Перебор всех занятий для поиска учеников
+        for attendance_id in attendances_ids:
+            attendance = self.session.get(
+                self.ATTENDANCES_FOR_SCREEN_URL_TEMPLATE.format(attendance_id=attendance_id)).json()["attendance"]
+
+            # Получаем учеников только с нужным статусом
+            attendees_list, attendance_time, attendance_teachers = self._get_filtered_attendees(attendance)
+
+            # Проверка наличия подписки у студента
+            students_attended_trial_and_has_subscription += self._get_row_data_for_student_attended_trial(
+                attendees_list, attendance_date, attendance_time, attendance_teachers)
+
+        return students_attended_trial_and_has_subscription
+
+    def _get_row_data_for_student_attended_trial(self, attendees_list: list, attendance_date: date,
+                                                 attendance_time: str, attendance_teachers: str) -> list:
+        students_attended_trial_and_has_subscription = []
+        for attendee in attendees_list:
+            subscriptions = self._get_student_subscriptions(attendee["id"], (attendance_date, None))
+            is_subscribed = "Куплен" if len(subscriptions) else "Не куплен"
+
+            students_attended_trial_and_has_subscription.append(
+                {
+                    "name": attendee["name"],
+                    "link": self.STUDENT_CARD_URL_TEMPLATE.format(student_id=attendee["id"]),
+                    "date": f"{attendance_date} {attendance_time}",
+                    "is_subscribed": is_subscribed,
+                    "teachers": attendance_teachers
+                }
+            )
+            logger.info(f"Student {attendee['id']} processed")
+        return students_attended_trial_and_has_subscription
+
     def get_students_with_non_renewed_subscription_in_month(self) -> list:
         students_with_non_renewed_subscription = []
         students = self._get_students()
@@ -262,55 +342,16 @@ class ParaplanAPI:
 
         return students_with_ending_subscription_in_next_month
 
-    def _get_attendances_ids(self, attendance_date: date) -> list:
-        attendance_list = self.session.get(
-            self.ATTENDANCES_URL_TEMPLATE.format(year=attendance_date.year, month=attendance_date.month,
-                                                 day=attendance_date.day)
-        ).json()["breakdown"]["attendanceList"]
-
-        return [attendance.get("id") for attendance in attendance_list]
-
     def get_students_attended_trial(self) -> list:
 
-        statuses_ids = ["fea4db4a-b812-a27f-1d02-998fc23f76b3", "78e0eab0-b4d4-9cd2-3c9a-bc862db3bbbc"]
         start_date, end_date = self._get_month_period("current")
         students_attended_trial_and_has_subscription = []
 
         # Перебор всех дней для сбора занятий
         current_date = start_date
         while current_date <= end_date:
-            attendances_ids = self._get_attendances_ids(current_date)
-
-            # Перебор всех занятий для поиска учеников
-            for attendance_id in attendances_ids:
-
-                attendance = self.session.get(
-                    self.ATTENDANCES_FOR_SCREEN_URL_TEMPLATE.format(attendance_id=attendance_id)).json()["attendance"]
-
-                # Получаем учеников только с нужным статусом
-                attendees_list = [{"id": attendee["studentInfo"]["id"], "name": attendee["studentInfo"]["name"]} for
-                                  attendee in attendance["attendeeList"] if attendee["statusId"] in statuses_ids]
-
-                attendance_time = f"{attendance['dateTime']['hour']}:{str(attendance['dateTime']['minute']).zfill(2)}"
-                attendance_teachers = " ".join([teacher["teacherInfo"]["name"] for teacher in attendance["teacherList"]])
-
-                # Проверка наличия подписки у студента
-                for attendee in attendees_list:
-                    subscriptions = self._get_student_subscriptions(attendee["id"])
-                    is_subscribed = "Не куплен"
-                    if len(subscriptions):
-                        is_subscribed = "Куплен"
-
-                    students_attended_trial_and_has_subscription.append(
-                        {
-                            "name": attendee["name"],
-                            "link": self.STUDENT_CARD_URL_TEMPLATE.format(student_id=attendee["id"]),
-                            "date": f"{current_date} {attendance_time}",
-                            "is_subscribed": is_subscribed,
-                            "teachers": attendance_teachers
-                        }
-                    )
-                    logger.info(f"Student {attendee['id']} processed")
+            students_attended_trial_and_has_subscription += self._get_students_attended_group_trial(current_date)
+            students_attended_trial_and_has_subscription += self._get_students_attended_individual_trial(current_date)
 
             current_date += timedelta(days=1)
 
@@ -413,10 +454,18 @@ class ParaplanAPI:
         logger.info("Excel file with students attended trial was created")
 
 
+def test():
+    paraplan = ParaplanAPI()
+    pprint(list(
+        filter(lambda status: "посетил" in status["name"].lower(), paraplan.get_attendances_statuses()["statusList"])))
+
+
 def main():
     if len(sys.argv) < 2:
-        logger.error("Не указан тип действия\nИспользуйте current-month | current-week | next-month | conversion-of-trial-sessions")
-        print("Не указан тип действия\nИспользуйте current-month | current-week | next-month | conversion-of-trial-sessions")
+        logger.error(
+            "Не указан тип действия\nИспользуйте current-month | current-week | next-month | conversion-of-trial-sessions")
+        print(
+            "Не указан тип действия\nИспользуйте current-month | current-week | next-month | conversion-of-trial-sessions")
         return
 
     if sys.argv[1] not in ["current-month", "current-week", "next-month", "conversion-of-trial-sessions"]:
