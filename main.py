@@ -342,9 +342,9 @@ class ParaplanAPI:
 
         return students_with_ending_subscription_in_next_month
 
-    def get_students_attended_trial(self) -> list:
+    def get_students_attended_trial(self, period: tuple[date, date]) -> list:
 
-        start_date, end_date = self._get_month_period("current")
+        start_date, end_date = period
         students_attended_trial_and_has_subscription = []
 
         # Перебор всех дней для сбора занятий
@@ -430,9 +430,9 @@ class ParaplanAPI:
         wb.save(filename=filename)
         logger.info("Excel file with students ending subs in next month was created")
 
-    def create_excel_students_attended_trial(self, filename: str) -> None:
+    def create_excel_students_attended_trial(self, filename: str, period: tuple[date, date]) -> None:
 
-        students = self.get_students_attended_trial()
+        students = self.get_students_attended_trial(period)
 
         wb = openpyxl.Workbook()
         ws = wb.worksheets[0]
@@ -461,23 +461,30 @@ def test():
 
 
 def main():
+    actions_list = ["current-month", "current-week", "next-month", "month-conversion-of-trial-sessions",
+                    "week-conversion-of-trial-sessions"]
+
     if len(sys.argv) < 2:
-        logger.error(
-            "Не указан тип действия\nИспользуйте current-month | current-week | next-month | conversion-of-trial-sessions")
-        print(
-            "Не указан тип действия\nИспользуйте current-month | current-week | next-month | conversion-of-trial-sessions")
+        message = f"Не указан тип действия\nИспользуйте {' | '.join(actions_list)}"
+        logger.error(message)
+        print(message)
         return
 
-    if sys.argv[1] not in ["current-month", "current-week", "next-month", "conversion-of-trial-sessions"]:
-        logger.error("Используйте current-month | current-week | next-month | conversion-of-trial-sessions")
-        print("Используйте current-month | current-week | next-month | conversion-of-trial-sessions")
+    if sys.argv[1] not in actions_list:
+        message = f"Используйте {' | '.join(actions_list)}"
+        logger.error(message)
+        print(message)
         return
 
     paraplan = ParaplanAPI()
 
-    if sys.argv[1] == "conversion-of-trial-sessions":
+    if sys.argv[1] == "month-conversion-of-trial-sessions":
         filename = "conversion-of-trial-sessions.xlsx"
-        paraplan.create_excel_students_attended_trial(filename)
+        paraplan.create_excel_students_attended_trial(filename, paraplan.current_month_period)
+        send_report_to_tg(filename)
+    if sys.argv[1] == "week-conversion-of-trial-sessions":
+        filename = "conversion-of-trial-sessions.xlsx"
+        paraplan.create_excel_students_attended_trial(filename, paraplan.current_week_period)
         send_report_to_tg(filename)
     if sys.argv[1] == "current-month":
         filename = "students-month.xlsx"

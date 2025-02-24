@@ -43,6 +43,12 @@ python main.py next-month
 ```
 
 Для генерации отчета “Конверсия пробных занятий”
+
+За месяц
 ```bash
-python main.py conversion-of-trial-sessions
+python main.py month-conversion-of-trial-sessions
+```
+За неделю
+```bash
+python main.py week-conversion-of-trial-sessions
 ```
