@@ -333,6 +333,7 @@ class ParaplanAPI:
 
             for subscription in subscriptions_ending_in_next_month:
                 students_with_ending_subscription_in_next_month.append({
+                    "name": student["name"],
                     "link": self.STUDENT_CARD_URL_TEMPLATE.format(student_id=student["id"]),
                     "subs_end_date": self._format_subs_end_date(subscription["endDate"]),
                     "total_price": subscription["totalPrice"]
@@ -418,14 +419,16 @@ class ParaplanAPI:
         wb = openpyxl.Workbook()
         ws = wb.worksheets[0]
 
-        ws["A1"] = "Сумма"
-        ws["B1"] = "Дата окончания абонемента"
-        ws["C1"] = "Ссылка на карточку ученика"
+        ws["A1"] = "Имя"
+        ws["B1"] = "Сумма"
+        ws["C1"] = "Дата окончания абонемента"
+        ws["D1"] = "Ссылка на карточку ученика"
 
         for row_index, student in enumerate(students, start=2):
-            ws[f"A{row_index}"] = student["total_price"]
-            ws[f"B{row_index}"] = student["subs_end_date"]
-            ws[f"C{row_index}"] = student["link"]
+            ws[f"A{row_index}"] = student["name"]
+            ws[f"B{row_index}"] = student["total_price"]
+            ws[f"C{row_index}"] = student["subs_end_date"]
+            ws[f"D{row_index}"] = student["link"]
 
         wb.save(filename=filename)
         logger.info("Excel file with students ending subs in next month was created")
