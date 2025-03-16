@@ -159,17 +159,17 @@ class ParaplanAPI:
     def _filter_subscriptions_by_end_date(self, subscriptions: list, period: tuple[date | None, date | None]) -> list:
         if period[0] and period[1]:
             return list(filter(
-                lambda item: period[0] < self._convert_subs_end_date_to_date(item["endDate"]) < period[1],
+                lambda item: period[0] <= self._convert_subs_end_date_to_date(item["endDate"]) <= period[1],
                 subscriptions
             ))
         if period[0]:
             return list(filter(
-                lambda item: period[0] < self._convert_subs_end_date_to_date(item["endDate"]),
+                lambda item: period[0] <= self._convert_subs_end_date_to_date(item["endDate"]),
                 subscriptions
             ))
         if period[1]:
             return list(filter(
-                lambda item: self._convert_subs_end_date_to_date(item["endDate"]) < period[1],
+                lambda item: self._convert_subs_end_date_to_date(item["endDate"]) <= period[1],
                 subscriptions
             ))
 
