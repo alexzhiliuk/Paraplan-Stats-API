@@ -358,6 +358,9 @@ class ParaplanAPI:
 
         return students_attended_trial_and_has_subscription
 
+    def get_teachers_attends_status(self) -> list:
+        pass
+
     def create_excel_file_students_with_non_renewed_subscription_in_month(self, filename) -> None:
 
         students = self.get_students_with_non_renewed_subscription_in_month()
@@ -456,6 +459,8 @@ class ParaplanAPI:
         wb.save(filename=filename)
         logger.info("Excel file with students attended trial was created")
 
+    def create_excel_students_teachers_attends_status(self, filename: str, period: tuple[date, date]) -> None:
+        pass
 
 def test():
     paraplan = ParaplanAPI()
