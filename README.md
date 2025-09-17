@@ -52,3 +52,10 @@ python main.py month-conversion-of-trial-sessions
 ```bash
 python main.py week-conversion-of-trial-sessions
 ```
+
+Для генерации отчета “Статистика проведенных занятий (преподаватели)”
+
+За месяц
+```bash
+python main.py teachers-stats
+```

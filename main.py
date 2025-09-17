@@ -12,6 +12,7 @@ import logging
 from dotenv import load_dotenv
 
 from exceptions import AuthError, CsrfTokenError
+from data_types import StatusesEnum, TeachersAttendancesStats
 from bot import send_report_to_tg
 
 logger = logging.getLogger(__name__)
@@ -33,10 +34,6 @@ class ParaplanAPI:
     STUDENT_SUBSCRIPTIONS_URL_TEMPLATE = BASE_URL + "/api/open/students/{student_id}/subscriptions/paginated?page=1&size=10"
     GROUP_INFO_URL_TEMPLATE = BASE_URL + "api/open/groups/{group_id}"
     STUDENT_CARD_URL_TEMPLATE = "https://paraplancrm.ru/crm/#/students/{student_id}/groups"
-
-    STATUSES = {
-        "ATTENDED_TRIAL": ["fea4db4a-b812-a27f-1d02-998fc23f76b3", "78e0eab0-b4d4-9cd2-3c9a-bc862db3bbbc"]
-    }
 
     LOGIN_DATA = json.dumps({
         "username": os.getenv("LOGIN", None),
@@ -196,7 +193,8 @@ class ParaplanAPI:
 
         attendees_list = [{"id": attendee["studentInfo"]["id"], "name": attendee["studentInfo"]["name"]} for
                           attendee in attendance["attendeeList"] if
-                          attendee["statusId"] in self.STATUSES["ATTENDED_TRIAL"]]
+                          attendee["statusId"] in [StatusesEnum.ATTENDED_TRIAL.value,
+                                                   StatusesEnum.ATTENDED_FREE_TRIAL.value]]
 
         attendance_time = f"{attendance['dateTime']['hour']}:{str(attendance['dateTime']['minute']).zfill(2)}"
         attendance_teachers = " ".join(
@@ -358,8 +356,42 @@ class ParaplanAPI:
 
         return students_attended_trial_and_has_subscription
 
-    def get_teachers_attends_status(self) -> list:
-        pass
+    def get_teachers_attendances_group_stats(self, period: tuple[date, date]) -> dict:
+        start_date, end_date = period
+        teachers_attendances_stats = TeachersAttendancesStats()
+
+        # Перебор всех дней для сбора занятий
+        current_date = start_date
+        while current_date <= end_date:
+            attendances_ids = self._get_attendances_ids(current_date)
+            for attendance_id in attendances_ids:
+                attendance = self.session.get(self.ATTENDANCES_FOR_SCREEN_URL_TEMPLATE.format(
+                    attendance_id=attendance_id)
+                ).json()["attendance"]
+                teachers_attendances_stats.add_teacher_attendance_stats(attendance)
+
+            current_date += timedelta(days=1)
+
+        return teachers_attendances_stats.get_stats()
+
+    def get_teachers_attendances_individual_stats(self, period: tuple[date, date]) -> dict:
+        start_date, end_date = period
+        teachers_attendances_stats = TeachersAttendancesStats()
+
+        # Перебор всех дней для сбора занятий
+        current_date = start_date
+        while current_date <= end_date:
+            group_list = self.session.get(self.IND_ATTENDANCES_URL_TEMPLATE.format(
+                year=current_date.year,
+                month=current_date.month,
+                day=current_date.day)).json()["groupList"]
+            for group in group_list:
+                for attendance in group.get("attendanceList", []):
+                    teachers_attendances_stats.add_teacher_attendance_stats(attendance)
+
+            current_date += timedelta(days=1)
+
+        return teachers_attendances_stats.get_stats()
 
     def create_excel_file_students_with_non_renewed_subscription_in_month(self, filename) -> None:
 
@@ -459,18 +491,52 @@ class ParaplanAPI:
         wb.save(filename=filename)
         logger.info("Excel file with students attended trial was created")
 
-    def create_excel_students_teachers_attends_status(self, filename: str, period: tuple[date, date]) -> None:
-        pass
+    def create_excel_teachers_attendances_stats(self, filename: str, period: tuple[date, date]) -> None:
+        group_stats = self.get_teachers_attendances_group_stats(period)
+        ind_stats = self.get_teachers_attendances_individual_stats(period)
+
+        def _create_head(work_sheet):
+            work_sheet["A1"] = "Педагог"
+            work_sheet["B1"] = "Посетил(а)"
+            work_sheet["C1"] = "Отработал(а)"
+            work_sheet["D1"] = "Пропустил(а)"
+            work_sheet["E1"] = "Посетил(а) платное пробное"
+            work_sheet["F1"] = "Сумма"
+            work_sheet["G1"] = "Количество проведенных занятий"
+
+        def _fill_data(work_sheet, data):
+            for row_index, (teacher, teacher_stats) in enumerate(data, start=2):
+                work_sheet[f"A{row_index}"] = teacher
+                work_sheet[f"B{row_index}"] = teacher_stats["statuses"]["ATTEND"]
+                work_sheet[f"C{row_index}"] = teacher_stats["statuses"]["WORKED_OUT"]
+                work_sheet[f"D{row_index}"] = teacher_stats["statuses"]["SKIP"]
+                work_sheet[f"E{row_index}"] = teacher_stats["statuses"]["ATTENDED_TRIAL"]
+                work_sheet[f"F{row_index}"] = f"=SUM(B{row_index}:E{row_index})"
+                work_sheet[f"G{row_index}"] = teacher_stats["attendances_count"]
+
+        wb = openpyxl.Workbook()
+        ws_group = wb.active
+        ws_group.title = "Групповые"
+        ws_ind = wb.create_sheet("Индивидуальные")
+
+        _create_head(ws_group)
+        _create_head(ws_ind)
+
+        _fill_data(ws_group, group_stats.items())
+        _fill_data(ws_ind, ind_stats.items())
+
+        wb.save(filename=filename)
+        logger.info("Excel file with teachers attendances stats was created")
+
 
 def test():
     paraplan = ParaplanAPI()
-    pprint(list(
-        filter(lambda status: "посетил" in status["name"].lower(), paraplan.get_attendances_statuses()["statusList"])))
+    pprint(paraplan.get_teachers_attendances_individual_stats(paraplan.current_month_period))
 
 
 def main():
     actions_list = ["current-month", "current-week", "next-month", "month-conversion-of-trial-sessions",
-                    "week-conversion-of-trial-sessions"]
+                    "week-conversion-of-trial-sessions", "teachers-stats"]
 
     if len(sys.argv) < 2:
         message = f"Не указан тип действия\nИспользуйте {' | '.join(actions_list)}"
@@ -486,6 +552,10 @@ def main():
 
     paraplan = ParaplanAPI()
 
+    if sys.argv[1] == "teachers-stats":
+        filename = "teacher-stats.xlsx"
+        paraplan.create_excel_teachers_attendances_stats(filename, paraplan.current_month_period)
+        send_report_to_tg(filename)
     if sys.argv[1] == "month-conversion-of-trial-sessions":
         filename = "conversion-of-trial-sessions.xlsx"
         paraplan.create_excel_students_attended_trial(filename, paraplan.current_month_period)
@@ -519,4 +589,4 @@ if __name__ == "__main__":
         print(err)
     except Exception as err:
         logger.error(err, exc_info=True)
-        print(err)
+        print(f"Error: {err}")
