@@ -1,5 +1,10 @@
+import logging
 from enum import Enum
 from typing import TypedDict
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, filename="logs.log",
+                    format="%(asctime)s::%(levelname)s::%(message)s")
 
 
 class Statuses(TypedDict):
@@ -45,6 +50,8 @@ class TeachersAttendancesStats:
 
     @classmethod
     def add_teacher_attendance_stats(cls, attendance):
+        if not attendance["teacherList"]:
+            return
         teacher = attendance["teacherList"][0]["teacherInfo"]["name"]
         cls._init_teacher(teacher)
 
